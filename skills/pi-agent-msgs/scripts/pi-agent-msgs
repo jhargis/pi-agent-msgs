@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+script=$(readlink -f -- "$0")
+exec "$(dirname -- "$script")/../../../bin/pi-agent-msgs" "$@"

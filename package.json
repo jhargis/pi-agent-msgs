@@ -1,0 +1,30 @@
+{
+  "name": "pi-agent-msgs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A local-first agent message bus with opt-in reporting for Pi and Pi Pocket.",
+  "license": "MIT",
+  "author": "Jay Hargis",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./pi/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "scripts": {
+    "test:cli": "python3 -m unittest discover -s test -p \"test_*.py\"",
+    "test:pocket": "node --test test/pocket.test.ts test/reporting.test.ts",
+    "test:pi": "node --test test/pi.test.ts test/pi-sdk.test.ts",
+    "test": "npm run test:cli && npm run test:pi && npm run test:pocket",
+    "check": "tsc --noEmit -p tsconfig.json"
+  }
+}

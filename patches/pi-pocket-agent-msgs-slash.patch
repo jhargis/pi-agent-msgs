@@ -1,0 +1,505 @@
+diff --git a/docs/architecture.md b/docs/architecture.md
+index f3f9cac..14e356c 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -50,6 +50,10 @@ A PR watch (`watches.ts`) is a `WatchDoc` in its session and a durable task ther
+ 
+ A repository watch (`repo-watches.ts`) is an item of the app-wide `RepoWatchesDoc` and a durable task in the conversation it messages (PiP's, or a session's), with the same wait, look, and send phases as a PR watch: a look puts the message in the task's checkpoint, and the send's request id is the task's and its count's, so it goes once. It reads the repository's issues, pulls, workflow runs, releases, and comments through `gh api`, and keeps the ids it told. PiP's tools (`repo_watch`, `session_watch_pr`, `session_start` with `repo`) act through `Pip` as its person; a repository is worked on or watched only where `gh`'s account can push, and `Pip.checkout` finds a session's checkout whose `origin` is the repository, or clones it once into `repos/`.
+ 
++### Optional agent-message slash bridge
++
++`/agent-msgs on|off|status` is handled in the browser and calls `Commands.agentMsgs` through `POST /api/c/:id/agent-msgs`, not `submit`. The command checks owner/access/session permissions and resolves only the fixed `pi-agent-msgs.reporting-command` task from the enabled registry (`ExtensionLoader.registeredTask`). It creates a background task and returns its status; it never executes arbitrary tools or starts a generation, so it also works without a selected model or after a spend limit. The external drop-in shares this state-changing implementation with its conversational tool. `hello.server.agentMsgsSlash` keeps newer web code from invoking the bridge before the server has restarted. This is not a general extension slash-command registration API.
++
+ ## Who chooses models
+ 
+ Only people choose models; Pi, PiP, and Pi Pocket itself never pick one on the side. Everything that runs a model uses one a person chose:
+diff --git a/docs/extensions.md b/docs/extensions.md
+index bb19b06..bc6ea51 100644
+--- a/docs/extensions.md
++++ b/docs/extensions.md
+@@ -143,6 +143,10 @@ Copy the module into a test app's data folder and turn it on, as `test/docs-exam
+ 
+ For a drop-in, run the test from Pi Pocket's folder with the module copied in, or check it by hand: turn it on, ask Pi to use it in a session made for the purpose, and watch Menu → Extensions and the app's notices for errors.
+ 
++## Optional pi-agent-msgs slash integration
++
++The separately installed `pi-agent-msgs` drop-in may register `pi-agent-msgs.reporting-command`, a durable task with input `{ action: "on" | "off" | "status", by: ownerId }` and a result containing `reporting: boolean` (optional `message` and nullable `error`). Pocket’s owner-only `/agent-msgs` bridge invokes this fixed task for the current regular conversation without submitting model input. The drop-in must validate its owner, extension-enabled state, and receiver exclusion itself too. Its tool and task should use the same reporting-state function. Older drop-ins without this task receive an update error. No generic `registerCommand` API is added to drop-ins.
++
+ ## A built-in extension
+ 
+ A new file in `src/server/extensions/` is loaded into the running server about 300 ms after it is first saved, on, for everyone: there is no way to try it there first. So write it as a drop-in, check it on a copy ([self-editing.md](self-editing.md#check-it-on-a-copy)), and move it in when it works.
+diff --git a/docs/features.md b/docs/features.md
+index 0f91bfb..d4161a3 100644
+--- a/docs/features.md
++++ b/docs/features.md
+@@ -16,6 +16,7 @@ The full tour. For setup, see the [README](../README.md).
+ - **Instructions for Pi.** Menu → **Instructions for Pi** (or `/instructions …`): ground rules Pi gets with every message in this session, such as "use pnpm, not npm". Everyone in the session can see them.
+ - **Memory.** Short lessons Pi keeps across sessions: how to build and test a project, a gotcha it hit, a convention, a preference someone stated. Pi proposes them with its `memory` tool as it learns (one or two sentences each, never secrets), and proposes fixing or forgetting one that turns out wrong; the owner approves. What Pi reads (a web page, a post, a comment, a file) could talk it into a "lesson" that would reach every later session, so nothing Pi saves, changes, or forgets counts until the owner says: **Approve** and **Discard** show right under Pi's memory call, with the words that wait and where they would apply (this project, or everywhere: every session and PiP), and in the sheet. Approve approves only what you saw: if Pi changed it since, the app says so and shows the new words. Lessons and project names are kept on one line, without invisible characters, so Pi reads only what the owner saw. A change or forgetting Pi proposes leaves the lesson as it was until then. Lessons you add yourself count at once. Each is for this project or for everywhere: a project's lessons reach every later session in the same repository, its worktrees included (or the same folder, outside a repository), and everywhere's reach every session and PiP. Menu → **Memory** (its hint says how many apply here and everywhere) lists them in those two groups, each with who saved it and a link to the session it came from (when you may see it), with Edit and Forget; type one in to add it by hand, for this project or everywhere, or use `/remember run the tests with make check` or **Remember…** on a message. A guest's lessons wait for the owner too, and a guest's change to one in force is a proposal they can withdraw. What waits shows at the top of the owner's sheet; the menu's hint says how many. Lessons waiting take no room from the approved ones, and a person (or Pi for them) may have 20 waiting at most. Only the owner, or whoever saved a lesson, changes or forgets it; viewers only read. A project keeps 40 lessons and everywhere 30; past that, forget one first. Changes show as lines in the chat. Turn it off in Extensions.
+ - **Plan mode.** The **Plan** chip by the message box (or `/plan`): Pi reads files and runs read-only commands, then proposes a plan; writing, editing, other commands, and subagents are blocked. **Approve plan** turns plan mode off and tells Pi to go ahead.
++- **Agent message reporting (optional drop-in).** With an updated `pi-agent-msgs` drop-in installed and enabled, the owner can use `/agent-msgs on`, `/agent-msgs off`, or `/agent-msgs status` (`/agent-msgs` alone shows status) in a regular session. These directly change/read that session’s opt-in without sending input to Pi, choosing a model, or spending tokens. New sessions remain off by default. Spoken/chat requests still work through the drop-in’s `agent_msgs` tool and share the same state. The selected receiver cannot report itself. An older server asks for a restart rather than interpreting the slash command as a model prompt.
+ - **Scheduled messages.** `/schedule in 2h check the deploy`, `/schedule tomorrow 9am …`, or `/schedule every weekday 8:00 summarize CI`, or Menu → **Scheduled messages**: Pi gets the message at its time, in this device's time zone, even with nobody watching, and the people in the session get the usual "Pi finished" notification. Pi can schedule its own follow-ups with its `schedule` tool. Each schedule is a durable task: a restart while it waits keeps waiting, one after its time sends at once, and none is ever sent twice. A schedule is cancelled, with a line in the chat saying why, once its person can no longer steer the session or a spend limit is reached.
+ - **Done when.** `/until npm test`: after each of Pi's answers, the check runs in the session's folder; while it fails, Pi gets the end of its output and keeps going, for five checks at most. A bar above the message box shows how it stands. With Lancet Guard on, the check must be a command the guard allows outright. In plan mode the check waits until the plan is approved, and past a spend limit Pi stops going on. A check cut off by a server restart is not run again, as it may have done part of its work: Pi hears so, and its next answer is checked.
+ - **Mention files.** Type `@` in the message box to pick a file or folder from the session's folder: `@` alone lists its top, `@src/` a folder's own files, and anything else matches across the whole folder (`@srvapp` finds `src/server/app.ts`). Tab or Enter (or a tap) puts the path in, and a folder opens to its files. Pi gets the message as written, `@src/server/app.ts` and all, and reads what it names; or tap **Send them along** above the box to send the files' contents with the message, as Claude Code does (text files up to 100 KB each, images as images when the model takes them). The list is git's in a repository (so ignored files stay out), and a walk that skips hidden and dependency folders elsewhere; your browser fetches it once and matches as you type, so suggestions never wait on the network.
+diff --git a/docs/map.md b/docs/map.md
+index cfe661b..130bca9 100644
+--- a/docs/map.md
++++ b/docs/map.md
+@@ -183,7 +183,7 @@ See [victor.md](victor.md) for the operator guide, source map, shared integratio
+ - **A sheet:** a component in `web/sheets/`, a case in `sheetBody` (`web/sheets.js`), and `openSheet({ type })` where it opens.
+ - **Something back should close** (a screen over the conversation, a view that takes another's place on a phone): `useBack(open, close)` from `web/back.js` in the component that shows it. Sheets already have it.
+ - **A built-in extension:** a file in `extensions/` (its extension named `pocket-…`), its place in `ORDER`, its title in `TITLES`, and its tools in `BUILT_IN_TOOLS` (`reload.ts`), and the order asserted in `test/app.test.ts`.
+-- **A slash command:** `web/commands.js`.
++- **A slash command:** `web/commands.js`. `/agent-msgs` is a narrow optional-drop-in bridge: `actions.agentMsgs` → `POST /api/c/:id/agent-msgs` → `commands.agentMsgs` → the installed `pi-agent-msgs.reporting-command` task. The extension owns the reporting state; no generation is created.
+ 
+ ## Rules that are easy to break
+ 
+diff --git a/src/server/app.ts b/src/server/app.ts
+index 9ba84e5..9cc7e9a 100644
+--- a/src/server/app.ts
++++ b/src/server/app.ts
+@@ -1527,6 +1527,8 @@ export class PocketApp {
+                 chat: true,
+                 // Tells the web app this server sends peek tiles (`POST /api/peeks`, `peek` events).
+                 peeks: true,
++                // Direct /agent-msgs API support; new web code must not send this command to an older server or model.
++                agentMsgsSlash: true,
+                 // This server's clock: peek tiles compare the browser's looks with when runs ended here.
+                 now: Date.now(),
+                 // Collaboration features: 2 adds roles, take turns, reactions, pins, notes, mentions, and push.
+diff --git a/src/server/commands.ts b/src/server/commands.ts
+index f87fbc4..5eafdd9 100644
+--- a/src/server/commands.ts
++++ b/src/server/commands.ts
+@@ -69,6 +69,9 @@ const context = BACKGROUND_CONTEXT;
+ 
+ export type Attachment = { path: string; name: string; mime: string; size: number };
+ 
++/** Contract with the pi-agent-msgs drop-in’s model-free reporting command task. */
++export type AgentMsgsStatus = { reporting: boolean; error?: string | null; message?: string };
++
+ export interface SubmitRequest {
+     text: string;
+     attachments?: Attachment[];
+@@ -1282,6 +1285,81 @@ export class Commands {
+         );
+     }
+ 
++    /** /agent-msgs changes the drop-in’s session setting without submitting input or starting a generation. */
++    async agentMsgs(id: ConversationId, user: User, action: unknown): Promise<AgentMsgsStatus> {
++        const app = this.#app;
++
++        app.requireSee(user, id);
++
++        if (user.role !== "owner") {
++            throw new HttpError(403, "Only the owner can manage agent message reporting.");
++        }
++
++        if (action !== "on" && action !== "off" && action !== "status") {
++            throw new HttpError(400, "Usage: /agent-msgs on|off|status");
++        }
++
++        const meta = app.sessionMeta(id);
++
++        if (meta === undefined || meta.pip !== undefined) {
++            throw new HttpError(400, "Choose a regular Pocket session, not PiP or a subagent.");
++        }
++
++        if (action !== "status") {
++            await app.requireDriver(id, user);
++        }
++
++        if (!app.loader.extensionNames().includes("pi-agent-msgs")) {
++            throw new HttpError(409, "Turn pi-agent-msgs on in Extensions first.");
++        }
++
++        const registered = app.loader.registeredTask("pi-agent-msgs.reporting-command");
++
++        if (registered === undefined) {
++            throw new HttpError(409, "Update the pi-agent-msgs drop-in to use /agent-msgs.");
++        }
++
++        const task = registered as Task<
++            { action: "on" | "off" | "status"; by: string },
++            { phase: "run" },
++            AgentMsgsStatus,
++            object
++        >;
++        const input = { action, by: user.id } as const;
++        const taskId = await app.harness.commit(
++            (tx) =>
++                tx.createTask(task, input, {
++                    conversationId: id,
++                    ownership: { kind: "conversation" },
++                    background: true,
++                }),
++            context,
++        );
++        const { state } = await app.harness.waitForTask(taskId, context);
++        const outcome = state.outcome;
++
++        if (outcome.status !== "completed") {
++            throw new HttpError(
++                400,
++                outcome.error?.message ?? "Agent message command stopped before completing.",
++            );
++        }
++
++        if (typeof outcome.result?.reporting !== "boolean") {
++            throw new HttpError(500, "The agent message command returned an invalid status.");
++        }
++
++        if (action !== "status") {
++            await app.collab.activity(
++                id,
++                user,
++                `set automatic agent reporting ${outcome.result.reporting ? "on" : "off"}`,
++            );
++        }
++
++        return outcome.result;
++    }
++
+     /** Turn plan mode on or off: while it is on, Pi reads and proposes a plan, and anything that changes something is blocked. */
+     async setPlan(id: ConversationId, user: User, on: unknown): Promise<void> {
+         const app = this.#app;
+diff --git a/src/server/http/conversation-routes.ts b/src/server/http/conversation-routes.ts
+index 162f29e..7ee44fa 100644
+--- a/src/server/http/conversation-routes.ts
++++ b/src/server/http/conversation-routes.ts
+@@ -164,6 +164,12 @@ export async function conversationRoutes(
+         return json(response, 200, { ok: true });
+     }
+ 
++    if (third === "agent-msgs" && method === "POST") {
++        const body = await readJson<{ action?: unknown }>(request);
++
++        return json(response, 200, await app.commands.agentMsgs(id, user, body.action));
++    }
++
+     if (third === "plan" && method === "POST") {
+         const body = await readJson<{ on?: unknown; approve?: unknown }>(request);
+ 
+diff --git a/src/server/reload.ts b/src/server/reload.ts
+index a225724..c0da9ca 100644
+--- a/src/server/reload.ts
++++ b/src/server/reload.ts
+@@ -334,6 +334,11 @@ export class ExtensionLoader {
+         return [...this.#installed.values()].flat().map((extension) => extension.name);
+     }
+ 
++    /** An installed task for a narrow, owner-checked app integration; uninstalled tasks are never returned. */
++    registeredTask(name: string) {
++        return this.#registry.snapshot().task(name);
++    }
++
+     async #load(file: string, cacheBust: boolean): Promise<Extension[]> {
+         const module = this.#module(file);
+ 
+diff --git a/web/commands.js b/web/commands.js
+index c782951..71d9e55 100644
+--- a/web/commands.js
++++ b/web/commands.js
+@@ -283,6 +283,44 @@ const COMMANDS = [
+             );
+         },
+     },
++    {
++        name: "agent-msgs",
++        args: "[on|off|status]",
++        description: "Automatic agent reports for this session (owner only; default off)",
++        // Keep this recognized even where unavailable: never fall through to a model call.
++        run: async (arg) => {
++            const action = arg.toLowerCase() || "status";
++
++            if (!["on", "off", "status"].includes(action)) {
++                throw new Error("Usage: /agent-msgs on|off|status");
++            }
++
++            if (store.state.me?.role !== "owner") {
++                throw new Error("Only the owner can manage agent message reporting.");
++            }
++
++            if (!isSession() || store.state.view.conversation?.pip) {
++                throw new Error("Choose a regular Pocket session, not PiP or a subagent.");
++            }
++
++            if (store.state.server?.agentMsgsSlash !== true) {
++                throw new Error(
++                    "Restart the Pocket server to enable /agent-msgs. Chat/voice controls still work.",
++                );
++            }
++
++            if (!store.state.server.extensions?.includes("pi-agent-msgs")) {
++                throw new Error("Turn pi-agent-msgs on in Extensions first.");
++            }
++
++            const result = await actions.agentMsgs(action);
++
++            notify(
++                "info",
++                `Automatic agent reporting is ${result.reporting ? "on" : "off"} for this session.${result.error ? ` ${result.error}` : ""}`,
++            );
++        },
++    },
+     {
+         name: "schedule",
+         args: "<when> <message>",
+diff --git a/web/store.js b/web/store.js
+index 2b6511d..65c0377 100644
+--- a/web/store.js
++++ b/web/store.js
+@@ -919,6 +919,7 @@ export const actions = {
+         api(`c/${current()}/fork`, { entryId, ...(worktree ? { worktree } : {}) }),
+     /** Send a message to Pi again in a fork that ends just before it: `{ text }` edits it, `{ model }` picks another model. */
+     resend: (entryId, change = {}) => api(`c/${current()}/resend`, { entryId, ...change }),
++    agentMsgs: (action) => api(`c/${current()}/agent-msgs`, { action }),
+     setPlan: (on) => api(`c/${current()}/plan`, { on }),
+     approvePlan: () => api(`c/${current()}/plan`, { approve: true }),
+     prompts: () => api(`c/${current()}/prompts`),
+diff --git a/test/agent-msgs.test.ts b/test/agent-msgs.test.ts
+new file mode 100644
+index 0000000..d649d71
+--- /dev/null
++++ b/test/agent-msgs.test.ts
+@@ -0,0 +1,241 @@
++// The slash integration runs a fixed, owner-checked extension task, never a generation or arbitrary tool.
++import {
++    type App,
++    cleanUp,
++    context,
++    modelTexts,
++    openApp,
++    owner,
++    recordCost,
++    root,
++    scriptedModel,
++    until,
++    work,
++} from "./helpers.ts";
++import assert from "node:assert/strict";
++import { mkdirSync, writeFileSync } from "node:fs";
++import { createServer, type Server } from "node:http";
++import { join } from "node:path";
++import { after, before, test } from "node:test";
++import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
++import type { ConversationId } from "@earendil-works/pi-durable";
++import { Browsers } from "../src/server/browser.ts";
++import { findBrowser } from "../src/server/browser/discovery.ts";
++import type { BrowserPage } from "../src/server/browser/page.ts";
++import { VIEWPORTS } from "../src/server/browser/viewport.ts";
++import { createHandler } from "../src/server/http.ts";
++
++const dropIns = join(root, "data/extensions");
++const moduleFile = join(dropIns, "pi-agent-msgs.ts");
++// Standalone contract fixture: core tests do not require the separately installed pi-agent-msgs project.
++const moduleSource = `/** Test the pi-agent-msgs slash contract. */
++import { defineDoc, defineExtension, defineTask } from "@earendil-works/pi-durable";
++const State = defineDoc({ kind: "test.agent-msgs", version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({ reporting: false }) });
++const command = defineTask({
++    name: "pi-agent-msgs.reporting-command", version: 1, initial: () => ({ phase: "run" }),
++    phases: { run: async (task, runtime, context) => runtime.commit(async (tx) => {
++        const doc = await tx.doc(State, runtime.conversationId);
++        if (task.input.action !== "status") doc.reporting = task.input.action === "on";
++        return { status: "terminal", outcome: { status: "completed", result: { reporting: doc.reporting, by: task.input.by } } };
++    }, context) },
++    abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
++});
++export default () => defineExtension({ name: "pi-agent-msgs", tasks: [command] });
++`;
++let app: App;
++let server: Server;
++let base: string;
++let target: ConversationId;
++let calls = 0;
++let browsers: Browsers | undefined;
++let page: BrowserPage;
++
++before(async () => {
++    mkdirSync(dropIns, { recursive: true });
++    writeFileSync(moduleFile, moduleSource);
++    app = await openApp(
++        scriptedModel(() => {
++            calls++;
++
++            return fauxAssistantMessage([fauxText("A model should not receive slash commands.")]);
++        }),
++    );
++    ({ id: target } = await app.commands.createSession(owner(app), { cwd: work }));
++    server = createServer(
++        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
++    );
++    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
++    base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
++});
++after(async () => {
++    await browsers?.closeAll({ final: true });
++    server?.closeAllConnections();
++    server?.close();
++    await app?.close();
++    cleanUp();
++});
++
++const request = async (body: unknown, token = app.config.ownerToken, pocket = true) => {
++    const response = await fetch(`${base}/api/c/${target}/agent-msgs`, {
++        method: "POST",
++        headers: {
++            authorization: `Bearer ${token}`,
++            "content-type": "application/json",
++            ...(pocket ? { "X-Pocket": "1" } : {}),
++        },
++        body: JSON.stringify(body),
++    });
++
++    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
++};
++
++test("requires the enabled, compatible extension and validates input before creating work", async () => {
++    assert.equal((await request({ action: "status" })).status, 409);
++    await app.setExtensionEnabled(owner(app), "pi-agent-msgs.ts", true);
++    assert.equal((await request({ action: "watch_on" })).status, 400);
++    assert.equal((await request({})).status, 400);
++    assert.equal((await request({ action: "on" }, app.config.ownerToken, false)).status, 403);
++    assert.equal(calls, 0);
++    assert.deepEqual(await modelTexts(app, target), []);
++});
++
++test("on/off/status work in a new session with no model, preserve attribution, and never create model input", async () => {
++    assert.equal(
++        (await (await app.harness.conversation(target, context))!.agent(context)).model,
++        undefined,
++    );
++    const initial = await request({ action: "status" });
++
++    assert.equal(initial.status, 200);
++    assert.equal(initial.body.reporting, false);
++    const enabled = await request({ action: "on", task: "pi.generation", by: "not-the-owner" });
++
++    assert.equal(enabled.status, 200);
++    assert.equal(enabled.body.reporting, true);
++    assert.equal(enabled.body.by, owner(app).id, "caller-supplied attribution is ignored");
++    assert.equal((await request({ action: "on" })).body.reporting, true);
++    assert.equal((await request({ action: "status" })).body.reporting, true);
++    assert.equal((await request({ action: "off" })).body.reporting, false);
++    assert.equal((await request({ action: "status" })).body.reporting, false);
++    assert.equal(calls, 0);
++    assert.deepEqual(await modelTexts(app, target), []);
++    assert.equal(app.isBusy(target), false);
++});
++
++test("guests/viewers cannot inspect or change the setting", async () => {
++    for (const role of ["guest", "viewer"] as const) {
++        const person = app.config.addUser(role, role);
++
++        for (const action of ["on", "off", "status"]) {
++            assert.equal((await request({ action }, person.token)).status, 403);
++        }
++    }
++
++    assert.equal(calls, 0);
++});
++
++test("the command can be disabled even past a spend limit", async () => {
++    await app.spend.setSessionBudget(owner(app), target, 0.01);
++    await recordCost(app, target, 0.01);
++    assert.equal((await request({ action: "on" })).status, 200);
++    assert.equal((await request({ action: "off" })).status, 200);
++    assert.equal(calls, 0);
++    await app.spend.setSessionBudget(owner(app), target, null);
++});
++
++test("an older drop-in gets a clear update error and a disabled module exposes no task", async () => {
++    writeFileSync(
++        moduleFile,
++        'import { defineExtension } from "@earendil-works/pi-durable"; export default () => defineExtension({name: "pi-agent-msgs"});',
++    );
++    await app.loader.reload("pi-agent-msgs.ts");
++    const old = await request({ action: "on" });
++
++    assert.equal(old.status, 409);
++    assert.match(String(old.body.error), /Update/);
++    writeFileSync(moduleFile, moduleSource);
++    await app.loader.reload("pi-agent-msgs.ts");
++    await app.setExtensionEnabled(owner(app), "pi-agent-msgs.ts", false);
++    assert.equal(app.loader.registeredTask("pi-agent-msgs.reporting-command"), undefined);
++    assert.equal((await request({ action: "on" })).status, 409);
++    await app.setExtensionEnabled(owner(app), "pi-agent-msgs.ts", true);
++    assert.equal(calls, 0);
++});
++
++const chromium = findBrowser();
++const real = { skip: chromium === undefined ? "no Chromium-based browser" : false };
++
++async function inPage<T>(script: string): Promise<T> {
++    return JSON.parse(await page.evaluate(script)) as T;
++}
++
++const fill = async (text: string) => {
++    await page.evaluate(
++        `const box = document.querySelector("textarea"); box.value = ${JSON.stringify(text)}; box.dispatchEvent(new Event("input", {bubbles: true}));`,
++    );
++    await until(
++        async () =>
++            await inPage<boolean>(
++                "return JSON.stringify(document.querySelector('button[aria-label=\"Send\"]')?.disabled === false)",
++            ),
++        "send enabled",
++    );
++};
++
++const send = async (text: string, notice: string) => {
++    await fill(text);
++    await page.evaluate("document.querySelector('button[aria-label=\"Send\"]').click()");
++    await until(
++        async () =>
++            await inPage<boolean>(
++                `return JSON.stringify(document.body.innerText.includes(${JSON.stringify(notice)}))`,
++            ),
++        notice,
++    );
++};
++
++test(
++    "mobile slash autocomplete and commands never reach Pi, including errors and pre-restart readiness",
++    real,
++    async () => {
++        browsers = new Browsers({
++            dataDir: join(root, "browser"),
++            load: async () => undefined,
++            save: () => {},
++        });
++        page = await browsers.open(1);
++        await page.setViewport(VIEWPORTS.mobile);
++        await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
++        await page.navigate(`${base}/s/${target}`);
++        await until(
++            async () =>
++                await inPage<boolean>(
++                    `return JSON.stringify((await import('/store.js')).store.state.view.conversation?.id === ${target})`,
++                ),
++            "session loaded",
++        );
++        await fill("/agent-m");
++        await until(
++            async () =>
++                await inPage<boolean>(
++                    'return JSON.stringify(document.body.innerText.includes("/agent-msgs"))',
++                ),
++            "slash suggestion",
++        );
++        await send("/agent-msgs on", "Automatic agent reporting is on for this session.");
++        assert.equal((await request({ action: "status" })).body.reporting, true);
++        await send("/agent-msgs off", "Automatic agent reporting is off for this session.");
++        assert.equal((await request({ action: "status" })).body.reporting, false);
++        await send("/agent-msgs", "Automatic agent reporting is off for this session.");
++        await send("/agent-msgs invalid", "Usage: /agent-msgs on|off|status");
++        await app.setExtensionEnabled(owner(app), "pi-agent-msgs.ts", false);
++        await send("/agent-msgs on", "Turn pi-agent-msgs on in Extensions first.");
++        await page.evaluate(
++            `(await import('/store.js')).store.set(state => ({ server: { ...state.server, agentMsgsSlash: undefined } }))`,
++        );
++        await send("/agent-msgs on", "Restart the Pocket server to enable /agent-msgs.");
++        assert.equal(calls, 0);
++        assert.deepEqual(await modelTexts(app, target), []);
++        assert.equal(app.isBusy(target), false);
++    },
++);

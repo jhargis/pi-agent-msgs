@@ -1,0 +1,10 @@
+node_modules
+__pycache__/
+*.py[cod]
+*.sqlite3*
+*.log
+.pocket/
+.env
+.env.*
+!.env.example
+.DS_Store

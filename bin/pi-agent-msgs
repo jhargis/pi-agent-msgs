@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+script=$(readlink -f -- "$0")
+exec python3 "$(dirname -- "$script")/../src/cli.py" "$@"
